@@ -166,51 +166,54 @@ class ImageMetadataProcessor(QMainWindow):
             return
 
         for file_path in file_paths:
-            try:
-                before = subprocess.check_output(['exiftool', '-j', '-xmp:all', '-iptc:all', '-DateTimeOriginal', file_path])
-                print(f"Before data for file {file_path}:")
-                print(before.decode('utf-8'))
-                before_dict = json.loads(before.decode('utf-8'))[0] if len(json.loads(before.decode('utf-8'))) > 0 else {}
-            except json.JSONDecodeError:
-                print(f"Error: Invalid JSON data for file {file_path}")
-                print(f"Raw data: {before.decode('utf-8')}")
-                continue
+            # Step 1: Get the current keywords for the file
+            current_keywords_output = subprocess.check_output(['exiftool', '-s', '-s', '-s', '-iptc:Keywords', file_path])
+            current_keywords = current_keywords_output.decode('utf-8').strip().split(', ')
 
-            # Modify metadata here
-            subprocess.check_call(
-                ['exiftool', f'-HierarchicalSubject={hierarchical_subject}', f'-Keywords+={keywords}',
-                 f'-Description={description}', f'-DateTimeOriginal={datetime_original}', '-overwrite_original',
-                 file_path])
+            # Step 2: Check if the new keyword(s) already exist in the file, and if not, add them
+            new_keywords = [kw for kw in keywords.split(', ') if kw not in current_keywords]
+            if new_keywords:
+                new_keywords_str = ','.join(new_keywords)
 
-            after = subprocess.check_output(['exiftool', '-j', '-xmp:all', '-iptc:all', '-DateTimeOriginal', file_path])
+                before = subprocess.check_output(['exiftool', '-j', '-xmp', '-iptc', '-DateTimeOriginal', file_path])
 
-            after_dict = json.loads(after.decode('utf-8'))[0] if len(json.loads(after.decode('utf-8'))) > 0 else {}
+                # Modify metadata here
+                subprocess.check_call(
+                    ['exiftool', f'-HierarchicalSubject={hierarchical_subject}', f'-Keywords+={new_keywords_str}',
+                     f'-Description={description}', f'-DateTimeOriginal={datetime_original}', '-overwrite_original',
+                     file_path])
 
+                after = subprocess.check_output(['exiftool', '-j', '-xmp', '-iptc', '-DateTimeOriginal', file_path])
 
-            before_xmp = before_dict.get('XMP', {})
-            before_iptc = before_dict.get('IPTC', {})
-            before_datetime = before_dict.get('EXIF:DateTimeOriginal', '')
+                before_dict = json.loads(before.decode('utf-8').strip('[]'))
+                after_dict = json.loads(after.decode('utf-8').strip('[]'))
 
-            after_xmp = after_dict.get('XMP', {})
-            after_iptc = after_dict.get('IPTC', {})
-            after_datetime = after_dict.get('EXIF:DateTimeOriginal', '')
+                before_xmp = before_dict.get('XMP', {})
+                before_iptc = before_dict.get('IPTC', {})
+                before_datetime = before_dict.get('EXIF:DateTimeOriginal', '')
 
-            xmp_diff = set(after_xmp.items()) - set(before_xmp.items())
-            iptc_diff = set(after_iptc.items()) - set(before_iptc.items())
-            datetime_diff = after_datetime != before_datetime
+                after_xmp = after_dict.get('XMP', {})
+                after_iptc = after_dict.get('IPTC', {})
+                after_datetime = after_dict.get('EXIF:DateTimeOriginal', '')
 
-            if xmp_diff or iptc_diff or datetime_diff:
-                print(f"Metadata changes detected for {file_path}:")
-                if xmp_diff:
-                    print(f"  XMP: {xmp_diff}")
-                if iptc_diff:
-                    print(f"  IPTC: {iptc_diff}")
-                if datetime_diff:
-                    print(f"  DateTimeOriginal: {before_datetime} -> {after_datetime}")
-            else:
-                print(f"No metadata changes detected for {file_path}")
+                xmp_diff = set(after_xmp.items()) - set(before_xmp.items())
+                iptc_diff = set(after_iptc.items()) - set(before_iptc.items())
+                datetime_diff = after_datetime != before_datetime
+
+                if xmp_diff or iptc_diff or datetime_diff:
+                    print(f"Metadata changes detected for {file_path}:")
+                    if xmp_diff:
+                        print(f"  XMP: {xmp_diff}")
+                    if iptc_diff:
+                        print(f"  IPTC: {iptc_diff}")
+                    if datetime_diff:
+                        print(f"  DateTimeOriginal: {before_datetime} -> {after_datetime}")
+                else:
+                    print(f"No metadata changes detected for {file_path}")
 
                 self.write_json_file(before_dict, after_dict, file_path)
+            else:
+                print(f"No new keywords added to {file_path}, as they already exist in the file.")
 
         QMessageBox.information(self, 'Processing Complete', f"Processed {len(file_paths)} images")
 
