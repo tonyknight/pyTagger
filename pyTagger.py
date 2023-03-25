@@ -157,7 +157,7 @@ class ImageMetadataProcessor(QMainWindow):
         hierarchical_subject = self.hierarchical_subject_field.text()
         keywords = self.keywords_field.text()
         description = self.description_field.toPlainText()
-        datetime_original = self.datetime_field.text()
+        datetime_original_input = self.datetime_field.text()
 
         file_paths = [self.model.item(i).text() for i in range(self.model.rowCount())]
 
@@ -165,57 +165,62 @@ class ImageMetadataProcessor(QMainWindow):
             QMessageBox.warning(self, 'No Files Selected', 'Please select one or more files to process.')
             return
 
+        successfully_processed_files = []
+
         for file_path in file_paths:
-            # Step 1: Get the current keywords for the file
-            current_keywords_output = subprocess.check_output(['exiftool', '-s', '-s', '-s', '-iptc:Keywords', file_path])
-            current_keywords = current_keywords_output.decode('utf-8').strip().split(', ')
+            current_keywords_output = subprocess.check_output(
+                ['exiftool', '-s', '-s', '-s', '-iptc:Keywords', file_path])
+            current_keywords = current_keywords_output.decode('utf-8').split(", ")
 
-            # Step 2: Check if the new keyword(s) already exist in the file, and if not, add them
-            new_keywords = [kw for kw in keywords.split(', ') if kw not in current_keywords]
-            if new_keywords:
-                new_keywords_str = ','.join(new_keywords)
+            before = subprocess.check_output(['exiftool', '-j', '-xmp', '-iptc', '-DateTimeOriginal', file_path])
+            before_dict = json.loads(before.decode('utf-8'))[0]
 
-                before = subprocess.check_output(['exiftool', '-j', '-xmp', '-iptc', '-DateTimeOriginal', file_path])
-
+            if keywords not in current_keywords:
                 # Modify metadata here
                 subprocess.check_call(
-                    ['exiftool', f'-HierarchicalSubject={hierarchical_subject}', f'-Keywords+={new_keywords_str}',
-                     f'-Description={description}', f'-DateTimeOriginal={datetime_original}', '-overwrite_original',
+                    ['exiftool', f'-HierarchicalSubject={hierarchical_subject}', f'-Keywords+={keywords}',
+                     f'-Description={description}', f'-DateTimeOriginal={datetime_original_input}',
+                     '-overwrite_original',
                      file_path])
 
-                after = subprocess.check_output(['exiftool', '-j', '-xmp', '-iptc', '-DateTimeOriginal', file_path])
+            after = subprocess.check_output(['exiftool', '-j', '-xmp', '-iptc', '-DateTimeOriginal', file_path])
+            after_dict = json.loads(after.decode('utf-8'))[0]
 
-                before_dict = json.loads(before.decode('utf-8').strip('[]'))
-                after_dict = json.loads(after.decode('utf-8').strip('[]'))
+            # Rename the file based on DateTimeOriginal, if it exists
+            datetime_original = after_dict.get("EXIF:DateTimeOriginal", "")
+            if datetime_original:
+                date_part, time_part = datetime_original.split(" ")
+                date_formatted = date_part.replace(":", "-")
+                time_formatted = time_part.replace(":", "-")
+                milliseconds = ""
 
-                before_xmp = before_dict.get('XMP', {})
-                before_iptc = before_dict.get('IPTC', {})
-                before_datetime = before_dict.get('EXIF:DateTimeOriginal', '')
+                if "." in time_formatted:
+                    time_formatted, milliseconds = time_formatted.split(".")
+                    milliseconds = f"({milliseconds})"
 
-                after_xmp = after_dict.get('XMP', {})
-                after_iptc = after_dict.get('IPTC', {})
-                after_datetime = after_dict.get('EXIF:DateTimeOriginal', '')
+                new_file_name = f"{date_formatted} {time_formatted}{milliseconds}{os.path.splitext(file_path)[1]}"
+                new_file_path = os.path.join(os.path.dirname(file_path), new_file_name)
 
-                xmp_diff = set(after_xmp.items()) - set(before_xmp.items())
-                iptc_diff = set(after_iptc.items()) - set(before_iptc.items())
-                datetime_diff = after_datetime != before_datetime
+                # Add a unique serial number if the new file path already exists
+                serial_number = 1
+                while os.path.exists(new_file_path):
+                    serial_number += 1
+                    new_file_name = f"{date_formatted} {time_formatted}{milliseconds} ({serial_number}){os.path.splitext(file_path)[1]}"
+                    new_file_path = os.path.join(os.path.dirname(file_path), new_file_name)
 
-                if xmp_diff or iptc_diff or datetime_diff:
-                    print(f"Metadata changes detected for {file_path}:")
-                    if xmp_diff:
-                        print(f"  XMP: {xmp_diff}")
-                    if iptc_diff:
-                        print(f"  IPTC: {iptc_diff}")
-                    if datetime_diff:
-                        print(f"  DateTimeOriginal: {before_datetime} -> {after_datetime}")
-                else:
-                    print(f"No metadata changes detected for {file_path}")
+                os.rename(file_path, new_file_path)
+                file_path = new_file_path  # Update the file_path variable
 
-                self.write_json_file(before_dict, after_dict, file_path)
-            else:
-                print(f"No new keywords added to {file_path}, as they already exist in the file.")
+            self.write_json_file(before_dict, after_dict, file_path)
+            successfully_processed_files.append(file_path)
 
-        QMessageBox.information(self, 'Processing Complete', f"Processed {len(file_paths)} images")
+        # Remove successfully processed files from the input list
+        for file_path in successfully_processed_files:
+            index = self.model.match(self.model.index(0, 0), Qt.ItemDataRole.DisplayRole, file_path, 1,
+                                     Qt.MatchFlag.MatchExactly)[0].row()
+            self.model.removeRow(index)
+
+        QMessageBox.information(self, 'Processing Complete', f"Processed {len(successfully_processed_files)} images")
 
 
 if __name__ == '__main__':
