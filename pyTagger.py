@@ -166,14 +166,12 @@ class ImageMetadataProcessor(QMainWindow):
             return
 
         successfully_processed_files = []
+        all_metadata = []
 
         for file_path in file_paths:
             current_keywords_output = subprocess.check_output(
                 ['exiftool', '-s', '-s', '-s', '-iptc:Keywords', file_path])
             current_keywords = current_keywords_output.decode('utf-8').split(", ")
-
-            before = subprocess.check_output(['exiftool', '-j', '-xmp', '-iptc', '-DateTimeOriginal', file_path])
-            before_dict = json.loads(before.decode('utf-8'))[0]
 
             if keywords not in current_keywords:
                 # Modify metadata here
@@ -183,42 +181,50 @@ class ImageMetadataProcessor(QMainWindow):
                      '-overwrite_original',
                      file_path])
 
-            after = subprocess.check_output(['exiftool', '-j', '-xmp', '-iptc', '-DateTimeOriginal', file_path])
-            after_dict = json.loads(after.decode('utf-8'))[0]
+                after = subprocess.check_output(['exiftool', '-j', '-xmp', '-iptc', '-DateTimeOriginal', file_path])
+                after_dict = json.loads(after.decode('utf-8'))[0]
+                all_metadata.append(after_dict)
 
-            # Rename the file based on DateTimeOriginal, if it exists
-            datetime_original = after_dict.get("EXIF:DateTimeOriginal", "")
-            if datetime_original:
-                date_part, time_part = datetime_original.split(" ")
-                date_formatted = date_part.replace(":", "-")
-                time_formatted = time_part.replace(":", "-")
-                milliseconds = ""
+                # Rename the file based on DateTimeOriginal, if it exists
+                datetime_original = after_dict.get("EXIF:DateTimeOriginal", "")
+                if datetime_original:
+                    # Extract the date, time, and milliseconds (if available) from the DateTimeOriginal tag
+                    date_part, time_part = datetime_original.split(" ")
+                    date_formatted = date_part.replace(":", "-")
+                    time_formatted = time_part.replace(":", "-")
+                    milliseconds = ""
 
-                if "." in time_formatted:
-                    time_formatted, milliseconds = time_formatted.split(".")
-                    milliseconds = f"({milliseconds})"
+                    # Check if time contains milliseconds and format accordingly
+                    if "." in time_formatted:
+                        time_formatted, milliseconds = time_formatted.split(".")
+                        milliseconds = f"({milliseconds})"
 
-                new_file_name = f"{date_formatted} {time_formatted}{milliseconds}{os.path.splitext(file_path)[1]}"
-                new_file_path = os.path.join(os.path.dirname(file_path), new_file_name)
-
-                # Add a unique serial number if the new file path already exists
-                serial_number = 1
-                while os.path.exists(new_file_path):
-                    serial_number += 1
-                    new_file_name = f"{date_formatted} {time_formatted}{milliseconds} ({serial_number}){os.path.splitext(file_path)[1]}"
+                    new_file_name = f"{date_formatted} {time_formatted}{milliseconds}{os.path.splitext(file_path)[1]}"
                     new_file_path = os.path.join(os.path.dirname(file_path), new_file_name)
 
-                os.rename(file_path, new_file_path)
-                file_path = new_file_path  # Update the file_path variable
+                    # Check if the file with the same name already exists, add a unique serial number if needed
+                    serial_number = 1
+                    while os.path.exists(new_file_path):
+                        new_file_name = f"{date_formatted} {time_formatted}{milliseconds} ({serial_number}){os.path.splitext(file_path)[1]}"
+                        new_file_path = os.path.join(os.path.dirname(file_path), new_file_name)
+                        serial_number += 1
 
-            self.write_json_file(before_dict, after_dict, file_path)
-            successfully_processed_files.append(file_path)
+                    os.rename(file_path, new_file_path)
+                    file_path = new_file_path  # Update the file_path variable
+
+                successfully_processed_files.append(file_path)
 
         # Remove successfully processed files from the input list
         for file_path in successfully_processed_files:
             index = self.model.match(self.model.index(0, 0), Qt.ItemDataRole.DisplayRole, file_path, 1,
                                      Qt.MatchFlag.MatchExactly)[0].row()
             self.model.removeRow(index)
+
+        # Write the combined JSON file for all images in the batch
+        if all_metadata:
+            json_file_path = os.path.join(os.path.dirname(file_paths[0]), "metadata.json")
+            with open(json_file_path, 'w') as f:
+                json.dump(all_metadata, f)
 
         QMessageBox.information(self, 'Processing Complete', f"Processed {len(successfully_processed_files)} images")
 
