@@ -174,6 +174,9 @@ class ImageMetadataProcessor(QMainWindow):
             current_keywords = current_keywords_output.decode('utf-8').split(", ")
 
             if keywords not in current_keywords:
+                before = subprocess.check_output(['exiftool', '-j', '-xmp:all', '-iptc:all', '-DateTimeOriginal', file_path])
+                before_dict = json.loads(before.decode('utf-8'))[0]
+
                 # Modify metadata here
                 subprocess.check_call(
                     ['exiftool', f'-HierarchicalSubject={hierarchical_subject}', f'-Keywords+={keywords}',
@@ -181,9 +184,8 @@ class ImageMetadataProcessor(QMainWindow):
                      '-overwrite_original',
                      file_path])
 
-                after = subprocess.check_output(['exiftool', '-j', '-xmp', '-iptc', '-DateTimeOriginal', file_path])
+                after = subprocess.check_output(['exiftool', '-j', '-xmp:all', '-iptc:all', '-DateTimeOriginal', file_path])
                 after_dict = json.loads(after.decode('utf-8'))[0]
-                all_metadata.append(after_dict)
 
                 # Rename the file based on DateTimeOriginal, if it exists
                 datetime_original = after_dict.get("EXIF:DateTimeOriginal", "")
@@ -202,7 +204,7 @@ class ImageMetadataProcessor(QMainWindow):
                     new_file_name = f"{date_formatted} {time_formatted}{milliseconds}{os.path.splitext(file_path)[1]}"
                     new_file_path = os.path.join(os.path.dirname(file_path), new_file_name)
 
-                    # Check if the file with the same name already exists, add a unique serial number if needed
+                    # Add a serial number if the new_file_path already exists
                     serial_number = 1
                     while os.path.exists(new_file_path):
                         new_file_name = f"{date_formatted} {time_formatted}{milliseconds} ({serial_number}){os.path.splitext(file_path)[1]}"
@@ -213,6 +215,13 @@ class ImageMetadataProcessor(QMainWindow):
                     file_path = new_file_path  # Update the file_path variable
 
                 successfully_processed_files.append(file_path)
+                metadata_entry = {'file_path': file_path, 'before': before_dict, 'after': after_dict}
+                all_metadata.append(metadata_entry)
+
+        # Write a single JSON file for all images
+        json_file_path = "metadata.json"
+        with open(json_file_path, 'w') as f:
+            json.dump(all_metadata, f)
 
         # Remove successfully processed files from the input list
         for file_path in successfully_processed_files:
