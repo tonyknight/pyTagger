@@ -174,7 +174,8 @@ class ImageMetadataProcessor(QMainWindow):
             current_keywords = current_keywords_output.decode('utf-8').split(", ")
 
             if keywords not in current_keywords:
-                before = subprocess.check_output(['exiftool', '-j', '-xmp:all', '-iptc:all', '-DateTimeOriginal', file_path])
+                before = subprocess.check_output(
+                    ['exiftool', '-j', '-xmp:all', '-iptc:all', '-DateTimeOriginal', file_path])
                 before_dict = json.loads(before.decode('utf-8'))[0]
 
                 # Modify metadata here
@@ -184,8 +185,13 @@ class ImageMetadataProcessor(QMainWindow):
                      '-overwrite_original',
                      file_path])
 
-                after = subprocess.check_output(['exiftool', '-j', '-xmp:all', '-iptc:all', '-DateTimeOriginal', file_path])
+                after = subprocess.check_output(
+                    ['exiftool', '-j', '-xmp:all', '-iptc:all', '-DateTimeOriginal', file_path])
                 after_dict = json.loads(after.decode('utf-8'))[0]
+
+                # Calculate the differences between before and after metadata
+                metaDiff = {key: (before_dict[key], after_dict[key]) for key in before_dict if
+                            before_dict[key] != after_dict[key]}
 
                 # Rename the file based on DateTimeOriginal, if it exists
                 datetime_original = after_dict.get("EXIF:DateTimeOriginal", "")
@@ -215,7 +221,8 @@ class ImageMetadataProcessor(QMainWindow):
                     file_path = new_file_path  # Update the file_path variable
 
                 successfully_processed_files.append(file_path)
-                metadata_entry = {'file_path': file_path, 'before': before_dict, 'after': after_dict}
+                metadata_entry = {'file_path': file_path, 'before': before_dict, 'after': after_dict,
+                                  'metaDiff': metaDiff}
                 all_metadata.append(metadata_entry)
 
         # Write a single JSON file for all images
